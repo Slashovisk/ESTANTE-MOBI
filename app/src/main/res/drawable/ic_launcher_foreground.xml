@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Livro em contorno com marcador. Área segura do ícone adaptável: 66dp no centro de 108dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#B4BCC7"
+        android:strokeWidth="4.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M44,73 H39 A4,4 0 0,1 35,69 V29 A4,4 0 0,1 39,25 H69 A4,4 0 0,1 73,29 V69 A4,4 0 0,1 69,73 H58 M35,63 H73" />
+    <path
+        android:fillColor="#B4BCC7"
+        android:pathData="M45,60.5 H57 V83 L51,78.5 L45,83 Z" />
+</vector>
