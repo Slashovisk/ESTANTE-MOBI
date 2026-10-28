@@ -158,6 +158,7 @@
     let encoding = 1252, firstImage = -1, huffIdx = 0, huffCount = 0, extraFlags = 0;
     let title = '', author = '', language = '', coverIdx = -1, exth = {};
     const isMobi = r0.length > 20 && ascii(r0, 16, 4) === 'MOBI';
+    if (isMobi && u32(r0, 36) >= 8) throw new Error('Este arquivo usa só o formato KF8 (AZW3), que a estante ainda não lê. Converta para EPUB no Calibre.');
     if (isMobi) {
       const hlen = u32(r0, 20);
       encoding = u32(r0, 28);

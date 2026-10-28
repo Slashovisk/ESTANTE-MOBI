@@ -16,7 +16,7 @@ android {
 
     defaultConfig {
         applicationId 'br.com.estantemobi'
-        minSdk 24
+        minSdk 26
         targetSdk 35
         versionCode buildNumber
         versionName "1.0.${buildNumber}"
@@ -62,6 +62,7 @@ android {
     }
 }
 
-// Sem dependências externas: o app usa só a WebView do sistema.
 dependencies {
+    // Leitura de arquivos RAR (quadrinhos .cbr). PDF usa o leitor embutido do Android; ZIP/EPUB usam java.util.zip.
+    implementation 'com.github.junrar:junrar:7.5.5'
 }

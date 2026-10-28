@@ -4,7 +4,7 @@ import base64, os
 here = os.path.dirname(os.path.abspath(__file__))
 rd = lambda n: open(os.path.join(here, n), encoding='utf-8').read()
 t = rd('app.template.html')
-t = t.replace('/*__PARSER__*/', rd('mobi-parser.js'))
+t = t.replace('/*__PARSER__*/', rd('mobi-parser.js')).replace('/*__FORMATS__*/', rd('formats.js'))
 t = t.replace('__SAMPLE_B64__', base64.b64encode(open(os.path.join(here, 'exemplo.mobi'), 'rb').read()).decode())
 i = t.index('<div class="app"')
 doc = ('<!doctype html>\n<html lang="pt-BR">\n<head>\n<meta charset="utf-8">\n'

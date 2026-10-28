@@ -28,7 +28,6 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayInputStream;
@@ -50,27 +49,41 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Estante MOBI: uma WebView com a interface do leitor (assets/www/index.html) e uma ponte
- * "Android" que guarda os livros na memória interna do app (files/books/).
+ * Estante: uma WebView com a interface (assets/www/index.html) e uma ponte "Android".
  *
- * Cada livro vira dois arquivos: <id>.bin (o .mobi original) e <id>.json (título, autor,
- * capa em miniatura, progresso). A página lê o livro em https://appassets.androidplatform.net/books/<id>.bin.
+ * Itens da estante ficam num banco SQLite. Arquivos avulsos são copiados para files/books/;
+ * pastas inteiras são lidas no lugar, com permissão persistente do Android.
+ *
+ * Endereços servidos para a página (https://appassets.androidplatform.net/...):
+ *   /books/<id>.bin            arquivo original (livros de texto)
+ *   /thumb/<id>.jpg            capa em miniatura
+ *   /comic/<id>/pages.json     número de páginas de um CBZ/CBR/ZIP
+ *   /comic/<id>/<n>            imagem da página n
+ *   /pdf/<id>/info.json        número de páginas de um PDF
+ *   /pdf/<id>/<n>.jpg?w=1200   página n desenhada na largura pedida
  */
 public class MainActivity extends Activity {
 
     private static final String HOST = "appassets.androidplatform.net";
     private static final String START_URL = "https://" + HOST + "/index.html";
     private static final int REQ_PICK = 4101;
-    private static final long MAX_BYTES = 300L * 1024 * 1024;
+    private static final int REQ_FOLDER = 4102;
+    private static final long MAX_BYTES = 600L * 1024 * 1024;
 
     private WebView web;
     private FrameLayout root;
     private File booksDir;
+    private LibraryDb db;
+    private Sources sources;
+    private Comics comics;
+    private Pdfs pdfs;
+    private Thumbs thumbs;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
-    private final Object metaLock = new Object();
+    private final ExecutorService scanner = Executors.newSingleThreadExecutor();
     private final List<String> pendingJs = new ArrayList<>();
     private volatile boolean pageReady = false;
+    private boolean rescannedOnStart = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -78,6 +91,12 @@ public class MainActivity extends Activity {
         booksDir = new File(getFilesDir(), "books");
         //noinspection ResultOfMethodCallIgnored
         booksDir.mkdirs();
+        db = new LibraryDb(this);
+        sources = new Sources(this);
+        comics = new Comics(sources, getCacheDir());
+        pdfs = new Pdfs(sources);
+        thumbs = new Thumbs(getFilesDir(), sources, db);
+        io.execute(this::migrateV1);
 
         if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
             WebView.setWebContentsDebuggingEnabled(true);
@@ -112,7 +131,6 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri u = request.getUrl();
                 if (HOST.equals(u.getHost())) return false;
-                // links externos dentro de um livro abrem no navegador
                 try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) { }
                 return true;
             }
@@ -131,7 +149,6 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        // pede para a página salvar a posição de leitura
         if (pageReady) web.evaluateJavascript("window.dispatchEvent(new Event('pagehide'))", null);
     }
 
@@ -147,6 +164,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         io.shutdown();
+        scanner.shutdown();
+        pdfs.close();
         if (web != null) {
             root.removeView(web);
             web.destroy();
@@ -159,9 +178,7 @@ public class MainActivity extends Activity {
     @SuppressWarnings("deprecation")
     private void setupEdgeToEdge() {
         Window w = getWindow();
-        if (Build.VERSION.SDK_INT >= 30) {
-            w.setDecorFitsSystemWindows(false);
-        }
+        if (Build.VERSION.SDK_INT >= 30) w.setDecorFitsSystemWindows(false);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             int l, t, r, b;
             if (Build.VERSION.SDK_INT >= 30) {
@@ -194,8 +211,7 @@ public class MainActivity extends Activity {
         } else {
             View decor = w.getDecorView();
             int flags = decor.getSystemUiVisibility();
-            int light = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-            if (Build.VERSION.SDK_INT >= 26) light |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            int light = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
             decor.setSystemUiVisibility(dark ? (flags & ~light) : (flags | light));
         }
     }
@@ -203,30 +219,96 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- servidor local da WebView
 
     private WebResourceResponse serve(Uri u) {
-        if (!HOST.equals(u.getHost())) return null; // fontes do Google etc. vão para a rede normalmente
+        if (!HOST.equals(u.getHost())) return null;
         String path = u.getPath();
         if (path == null || path.equals("/") || path.isEmpty()) path = "/index.html";
-        if (path.contains("..")) return notFound();
+        if (path.contains("..")) return status(404, null);
         try {
-            if (path.startsWith("/books/")) {
-                String name = path.substring("/books/".length());
-                if (!name.matches("[A-Za-z0-9_-]{1,64}\\.bin")) return notFound();
-                File f = new File(booksDir, name);
-                if (!f.isFile()) return notFound();
-                Map<String, String> h = new HashMap<>();
-                h.put("Cache-Control", "no-store");
-                h.put("Content-Length", String.valueOf(f.length()));
-                return new WebResourceResponse("application/octet-stream", null, 200, "OK", h, new FileInputStream(f));
+            String[] seg = path.substring(1).split("/");
+            switch (seg[0]) {
+                case "books": {
+                    Book b = bookFrom(seg, 1, ".bin");
+                    if (b == null) return status(404, null);
+                    Map<String, String> h = new HashMap<>();
+                    h.put("Cache-Control", "no-store");
+                    if (b.size > 0) h.put("Content-Length", String.valueOf(b.size));
+                    return new WebResourceResponse("application/octet-stream", null, 200, "OK", h, sources.open(b));
+                }
+                case "thumb": {
+                    Book b = bookFrom(seg, 1, ".jpg");
+                    File f = b == null ? null : thumbs.get(b);
+                    if (f == null) return status(404, null);
+                    Map<String, String> h = new HashMap<>();
+                    h.put("Cache-Control", "max-age=31536000");
+                    return new WebResourceResponse("image/jpeg", null, 200, "OK", h, new FileInputStream(f));
+                }
+                case "comic": {
+                    Book b = seg.length > 2 ? db.get(seg[1]) : null;
+                    if (b == null) return status(404, null);
+                    if (seg[2].equals("pages.json")) {
+                        try {
+                            Comics.Pages p = comics.get(b);
+                            if (p.count() > 0 && b.pages != p.count()) db.update(b.id, new JSONObject().put("pages", p.count()));
+                            return json("{\"pages\":" + p.count() + "}");
+                        } catch (Exception e) {
+                            return json(new JSONObject().put("error", message(e, "Não foi possível abrir este quadrinho.")).toString());
+                        }
+                    }
+                    Comics.Pages p = comics.get(b);
+                    int i = Integer.parseInt(seg[2]);
+                    if (i < 0 || i >= p.count()) return status(404, null);
+                    Map<String, String> h = new HashMap<>();
+                    h.put("Cache-Control", "max-age=86400");
+                    return new WebResourceResponse(Sources.imageMime(p.name(i)), null, 200, "OK", h, new ByteArrayInputStream(p.read(i)));
+                }
+                case "pdf": {
+                    Book b = seg.length > 2 ? db.get(seg[1]) : null;
+                    if (b == null) return status(404, null);
+                    if (seg[2].equals("info.json")) {
+                        try {
+                            int n = pdfs.pageCount(b);
+                            return json("{\"pages\":" + n + "}");
+                        } catch (Exception e) {
+                            return json(new JSONObject().put("error", message(e, "Não foi possível abrir este PDF.")).toString());
+                        }
+                    }
+                    int i = Integer.parseInt(seg[2].replace(".jpg", ""));
+                    int w = 1200;
+                    try { w = Integer.parseInt(u.getQueryParameter("w")); } catch (Exception ignored) { }
+                    Map<String, String> h = new HashMap<>();
+                    h.put("Cache-Control", "max-age=86400");
+                    return new WebResourceResponse("image/jpeg", null, 200, "OK", h, new ByteArrayInputStream(pdfs.render(b, i, w)));
+                }
+                default: {
+                    InputStream in = getAssets().open("www" + path);
+                    return new WebResourceResponse(mimeOf(path), "UTF-8", in);
+                }
             }
-            InputStream in = getAssets().open("www" + path);
-            return new WebResourceResponse(mimeOf(path), "UTF-8", in);
-        } catch (IOException e) {
-            return notFound();
+        } catch (Exception e) {
+            return status(500, null);
         }
     }
 
-    private static WebResourceResponse notFound() {
-        return new WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", new HashMap<>(), new ByteArrayInputStream(new byte[0]));
+    private Book bookFrom(String[] seg, int i, String suffix) {
+        if (seg.length <= i) return null;
+        String id = seg[i];
+        if (id.endsWith(suffix)) id = id.substring(0, id.length() - suffix.length());
+        return validId(id) ? db.get(id) : null;
+    }
+
+    private static String message(Exception e, String fallback) {
+        String m = e.getMessage();
+        return m == null || m.isEmpty() || m.startsWith("java.") ? fallback : m;
+    }
+
+    private static WebResourceResponse json(String body) {
+        Map<String, String> h = new HashMap<>();
+        h.put("Cache-Control", "no-store");
+        return new WebResourceResponse("application/json", "UTF-8", 200, "OK", h, new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static WebResourceResponse status(int code, String reason) {
+        return new WebResourceResponse("text/plain", "UTF-8", code, reason == null ? (code == 404 ? "Not Found" : "Error") : reason, new HashMap<>(), new ByteArrayInputStream(new byte[0]));
     }
 
     private static String mimeOf(String path) {
@@ -259,7 +341,6 @@ public class MainActivity extends Activity {
         }
         boolean openAfter = uris.size() == 1;
         for (Uri u : uris) importUri(u, openAfter);
-        // não importa de novo se a tela for recriada
         setIntent(new Intent(Intent.ACTION_MAIN));
     }
 
@@ -280,7 +361,21 @@ public class MainActivity extends Activity {
     @SuppressWarnings("deprecation")
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQ_PICK || resultCode != RESULT_OK || data == null) return;
+        if (resultCode != RESULT_OK || data == null) return;
+        if (requestCode == REQ_FOLDER && data.getData() != null) {
+            Uri tree = data.getData();
+            try {
+                getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException e) {
+                js("window.onImportError && window.onImportError(" + JSONObject.quote("O Android não deu permissão para ler esta pasta.") + ")");
+                return;
+            }
+            String name = FolderScanner.displayName(getContentResolver(), tree);
+            db.addFolder(tree.toString(), name);
+            scanFolder(tree.toString(), name);
+            return;
+        }
+        if (requestCode != REQ_PICK) return;
         ClipData clip = data.getClipData();
         if (clip != null && clip.getItemCount() > 0) {
             for (int i = 0; i < clip.getItemCount(); i++) importUri(clip.getItemAt(i).getUri(), false);
@@ -290,24 +385,43 @@ public class MainActivity extends Activity {
     }
 
     @SuppressWarnings("deprecation")
-    private void openPicker() {
-        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        i.addCategory(Intent.CATEGORY_OPENABLE);
-        i.setType("*/*");
-        i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+    private void openPicker(boolean folder) {
+        Intent i = folder ? new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE) : new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        if (!folder) {
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("*/*");
+            i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        }
         try {
-            startActivityForResult(i, REQ_PICK);
+            startActivityForResult(i, folder ? REQ_FOLDER : REQ_PICK);
         } catch (Exception e) {
-            // aparelhos sem o seletor de documentos
-            Intent g = new Intent(Intent.ACTION_GET_CONTENT);
-            g.addCategory(Intent.CATEGORY_OPENABLE);
-            g.setType("*/*");
-            g.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-            try {
-                startActivityForResult(Intent.createChooser(g, getString(R.string.pick_title)), REQ_PICK);
-            } catch (Exception e2) {
-                js("window.onImportError && window.onImportError(" + JSONObject.quote("Não há um seletor de arquivos disponível neste aparelho.") + ")");
-            }
+            js("window.onImportError && window.onImportError(" + JSONObject.quote("Não há um seletor de arquivos disponível neste aparelho.") + ")");
+        }
+    }
+
+    private void scanFolder(String treeUri, String name) {
+        js("window.onScanProgress && window.onScanProgress(" + JSONObject.quote(name) + ", 0)");
+        scanner.execute(() -> {
+            FolderScanner fs = new FolderScanner(getContentResolver(), db);
+            FolderScanner.Result r = fs.scan(treeUri, name, n ->
+                    js("window.onScanProgress && window.onScanProgress(" + JSONObject.quote(name) + ", " + n + ")"));
+            js("window.onScanDone && window.onScanDone(" + JSONObject.quote(name) + ", " + r.total + ", " + r.added + ")");
+        });
+    }
+
+    /** Ao abrir o app, confere as pastas em segundo plano para pegar arquivos novos ou apagados. */
+    private void rescanAll() {
+        for (String[] f : db.folders()) {
+            String uri = f[0], name = f[1];
+            scanner.execute(() -> {
+                boolean ok = false;
+                for (android.content.UriPermission p : getContentResolver().getPersistedUriPermissions()) {
+                    if (p.getUri().toString().equals(uri) && p.isReadPermission()) ok = true;
+                }
+                if (!ok) return; // permissão perdida: a pasta continua listada; o usuário pode removê-la
+                FolderScanner.Result r = new FolderScanner(getContentResolver(), db).scan(uri, name, null);
+                if (r.added > 0 || r.removed > 0) js("window.onLibraryChanged && window.onLibraryChanged()");
+            });
         }
     }
 
@@ -319,7 +433,7 @@ public class MainActivity extends Activity {
                 if (in == null) throw new IOException("O arquivo não pôde ser aberto.");
                 saveBook(in, name, openAfter);
             } catch (SecurityException e) {
-                importFailed(name, "Sem permissão para ler este arquivo. Tente escolher pelo botão Adicionar livro.");
+                importFailed(name, "Sem permissão para ler este arquivo. Tente pelo botão Adicionar.");
             } catch (Exception e) {
                 importFailed(name, e.getMessage());
             }
@@ -348,12 +462,19 @@ public class MainActivity extends Activity {
         File out = new File(booksDir, id + ".bin");
         MessageDigest sha = MessageDigest.getInstance("SHA-1");
         long total = 0;
+        byte[] head = new byte[4096];
+        int headLen = 0;
         try (OutputStream os = new FileOutputStream(out)) {
             byte[] buf = new byte[64 * 1024];
             int n;
             while ((n = in.read(buf)) > 0) {
+                if (headLen < head.length) {
+                    int k = Math.min(n, head.length - headLen);
+                    System.arraycopy(buf, 0, head, headLen, k);
+                    headLen += k;
+                }
                 total += n;
-                if (total > MAX_BYTES) throw new IOException("Arquivo grande demais (mais de 300 MB).");
+                if (total > MAX_BYTES) throw new IOException("Arquivo grande demais (mais de 600 MB). Use \"Adicionar uma pasta inteira\" para arquivos grandes.");
                 sha.update(buf, 0, n);
                 os.write(buf, 0, n);
             }
@@ -367,42 +488,33 @@ public class MainActivity extends Activity {
             out.delete();
             throw new IOException("O arquivo está vazio.");
         }
+        String format = Book.detect(name, head, headLen);
+        boolean known = false;
+        for (String f : Book.FORMATS) if (f.equals(format)) known = true;
+        if (!known) {
+            //noinspection ResultOfMethodCallIgnored
+            out.delete();
+            throw new IOException("Formato não suportado. A estante abre MOBI, EPUB, FB2, TXT, CBZ, CBR e PDF.");
+        }
         StringBuilder hex = new StringBuilder();
         for (byte b : sha.digest()) hex.append(String.format(Locale.ROOT, "%02x", b));
         String hash = hex.toString();
 
-        synchronized (metaLock) {
-            String existing = findByHash(hash);
-            if (existing != null) {
-                //noinspection ResultOfMethodCallIgnored
-                out.delete();
-                js("window.onBookImported && window.onBookImported(" + JSONObject.quote(existing) + ", true, " + openAfter + ")");
-                return;
-            }
-            JSONObject meta = new JSONObject();
-            meta.put("id", id);
-            meta.put("fileName", name == null ? "livro.mobi" : name);
-            meta.put("size", total);
-            meta.put("added", System.currentTimeMillis());
-            meta.put("hash", hash);
-            meta.put("pos", 0);
-            meta.put("lastRead", 0);
-            meta.put("pending", true);
-            writeText(new File(booksDir, id + ".json"), meta.toString());
+        String existing = db.findByHash(hash);
+        if (existing != null) {
+            //noinspection ResultOfMethodCallIgnored
+            out.delete();
+            js("window.onBookImported && window.onBookImported(" + JSONObject.quote(existing) + ", true, " + openAfter + ")");
+            return;
         }
+        Book b = new Book();
+        b.id = id; b.path = out.getAbsolutePath(); b.name = name == null ? "livro." + format : name;
+        b.format = format.equals("prc") || format.equals("azw") ? "mobi" : format;
+        b.size = total; b.added = System.currentTimeMillis(); b.hash = hash;
+        db.insertCopy(b);
+        // lê título, autor e capa já agora, para o cartão aparecer completo
+        thumbs.get(db.get(id));
         js("window.onBookImported && window.onBookImported(" + JSONObject.quote(id) + ", false, " + openAfter + ")");
-    }
-
-    private String findByHash(String hash) {
-        File[] files = booksDir.listFiles((d, n) -> n.endsWith(".json"));
-        if (files == null) return null;
-        for (File f : files) {
-            try {
-                JSONObject m = new JSONObject(readText(f));
-                if (hash.equals(m.optString("hash")) && new File(booksDir, m.optString("id") + ".bin").isFile()) return m.optString("id");
-            } catch (Exception ignored) { }
-        }
-        return null;
     }
 
     private String displayName(Uri uri) {
@@ -416,27 +528,36 @@ public class MainActivity extends Activity {
         return name;
     }
 
-    // ---------------------------------------------------------------- utilidades
+    /** Versão 1 guardava cada livro como <id>.bin + <id>.json. Passa tudo para o banco. */
+    private void migrateV1() {
+        File[] metas = booksDir.listFiles((d, n) -> n.endsWith(".json"));
+        if (metas == null) return;
+        for (File f : metas) {
+            try {
+                JSONObject m = new JSONObject(readText(f));
+                String id = m.optString("id");
+                File bin = new File(booksDir, id + ".bin");
+                if (validId(id) && bin.isFile() && db.get(id) == null) {
+                    Book b = new Book();
+                    b.id = id; b.path = bin.getAbsolutePath(); b.name = m.optString("fileName", "livro.mobi");
+                    b.format = "mobi"; b.size = bin.length(); b.added = m.optLong("added", System.currentTimeMillis());
+                    b.hash = m.optString("hash", null); b.pos = m.optDouble("pos", 0); b.lastRead = m.optLong("lastRead", 0);
+                    String t = m.optString("title", "");
+                    b.title = t.isEmpty() ? null : t;
+                    String a = m.optString("author", "");
+                    b.author = a.isEmpty() ? null : a;
+                    db.insertCopy(b);
+                }
+                //noinspection ResultOfMethodCallIgnored
+                f.delete();
+            } catch (Exception ignored) { }
+        }
+        if (metas.length > 0) js("window.onLibraryChanged && window.onLibraryChanged()");
+    }
 
     private static String readText(File f) throws IOException {
         try (FileInputStream in = new FileInputStream(f)) {
-            byte[] b = new byte[(int) f.length()];
-            int off = 0, n;
-            while (off < b.length && (n = in.read(b, off, b.length - off)) > 0) off += n;
-            return new String(b, 0, off, StandardCharsets.UTF_8);
-        }
-    }
-
-    private static void writeText(File f, String s) throws IOException {
-        File tmp = new File(f.getParentFile(), f.getName() + ".tmp");
-        try (FileOutputStream os = new FileOutputStream(tmp)) {
-            os.write(s.getBytes(StandardCharsets.UTF_8));
-            os.getFD().sync();
-        }
-        if (!tmp.renameTo(f)) {
-            //noinspection ResultOfMethodCallIgnored
-            f.delete();
-            if (!tmp.renameTo(f)) throw new IOException("Não foi possível salvar os dados do livro.");
+            return new String(Comics.readFully(in), StandardCharsets.UTF_8);
         }
     }
 
@@ -462,62 +583,63 @@ public class MainActivity extends Activity {
                 pageReady = true;
                 for (String c : pendingJs) web.evaluateJavascript(c, null);
                 pendingJs.clear();
+                if (!rescannedOnStart) { rescannedOnStart = true; rescanAll(); }
             });
         }
 
         @JavascriptInterface
         public String listBooks() {
-            JSONArray arr = new JSONArray();
-            synchronized (metaLock) {
-                File[] files = booksDir.listFiles((d, n) -> n.endsWith(".json"));
-                if (files != null) {
-                    for (File f : files) {
-                        try {
-                            JSONObject m = new JSONObject(readText(f));
-                            if (new File(booksDir, m.optString("id") + ".bin").isFile()) arr.put(m);
-                        } catch (Exception ignored) { }
-                    }
-                }
-            }
-            return arr.toString();
+            return db.listJson();
         }
 
         @JavascriptInterface
         public void updateMeta(String id, String patchJson) {
             if (!validId(id)) return;
-            synchronized (metaLock) {
-                File f = new File(booksDir, id + ".json");
-                if (!f.isFile()) return;
-                try {
-                    JSONObject m = new JSONObject(readText(f));
-                    JSONObject patch = new JSONObject(patchJson);
-                    JSONArray keys = patch.names();
-                    if (keys != null) {
-                        for (int i = 0; i < keys.length(); i++) {
-                            String k = keys.getString(i);
-                            if (k.equals("id") || k.equals("hash")) continue;
-                            m.put(k, patch.get(k));
-                        }
-                    }
-                    writeText(f, m.toString());
-                } catch (Exception ignored) { }
-            }
+            try { db.update(id, new JSONObject(patchJson)); } catch (Exception ignored) { }
         }
 
         @JavascriptInterface
         public void deleteBook(String id) {
             if (!validId(id)) return;
-            synchronized (metaLock) {
+            Book b = db.get(id);
+            if (b == null) return;
+            if ("app".equals(b.source)) {
                 //noinspection ResultOfMethodCallIgnored
-                new File(booksDir, id + ".bin").delete();
-                //noinspection ResultOfMethodCallIgnored
-                new File(booksDir, id + ".json").delete();
+                new File(b.path).delete();
+                db.delete(id);
+                thumbs.forget(id);
+            } else {
+                db.hide(id); // arquivo de pasta: só sai da estante, o arquivo fica no celular
             }
+            comics.forget(id);
         }
 
         @JavascriptInterface
         public void pickBook() {
-            ui.post(MainActivity.this::openPicker);
+            ui.post(() -> openPicker(false));
+        }
+
+        @JavascriptInterface
+        public void pickFolder() {
+            ui.post(() -> openPicker(true));
+        }
+
+        @JavascriptInterface
+        public String listFolders() {
+            return db.foldersJson();
+        }
+
+        @JavascriptInterface
+        public void rescanFolder(String uri) {
+            for (String[] f : db.folders()) if (f[0].equals(uri)) scanFolder(f[0], f[1]);
+        }
+
+        @JavascriptInterface
+        public void removeFolder(String uri) {
+            db.removeFolder(uri);
+            try {
+                getContentResolver().releasePersistableUriPermission(Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception ignored) { }
         }
 
         @JavascriptInterface
