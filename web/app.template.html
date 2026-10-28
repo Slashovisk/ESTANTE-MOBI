@@ -325,21 +325,23 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
 .pv.doc .pv-loading { background: var(--paper); color: var(--muted); }
 .pv.doc .spread img { background: #fff; box-shadow: 0 1px 8px rgba(0,0,0,.18); }
 .pv.doc[data-fit="width"] .spread { padding: 10px 8px 90px; }
+.pv.doc[data-fit="fill"] .spread { padding: 4px 0 90px; }
+.pv.doc[data-fit="fill"] .spread img { box-shadow: none; }
 .kindrow { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; padding: 4px 0 12px; }
 .kindrow > span { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
 
 .pv { position: absolute; inset: 0; z-index: 45; background: #111; color: #eee; }
 .pv:not(.doc) { --rule: #2c2c2c; --chrome: #1b1b1b; --muted: #9a9a9a; --ink: #eee; --paper: #111; }
 .pv-stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
-.pv[data-fit="width"] .pv-stage { overflow-y: auto; touch-action: pan-y; }
+.pv:is([data-fit="width"], [data-fit="fill"]) .pv-stage { overflow-y: auto; touch-action: pan-y; }
 .pv-track { position: absolute; inset: 0; transform-origin: 50% 50%; will-change: transform; }
-.pv[data-fit="width"] .pv-track { position: relative; inset: auto; min-height: 100%; }
+.pv:is([data-fit="width"], [data-fit="fill"]) .pv-track { position: relative; inset: auto; min-height: 100%; }
 .spread { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 0; }
 .spread.rtl { flex-direction: row-reverse; }
 .spread img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; -webkit-user-drag: none; }
 .spread.two img { max-width: 50%; }
-.pv[data-fit="width"] .spread { position: relative; inset: auto; display: block; }
-.pv[data-fit="width"] .spread img { width: 100%; max-width: 100%; max-height: none; height: auto; }
+.pv:is([data-fit="width"], [data-fit="fill"]) .spread { position: relative; inset: auto; display: block; }
+.pv:is([data-fit="width"], [data-fit="fill"]) .spread img { width: 100%; max-width: 100%; max-height: none; height: auto; }
 .pv-err { color: #bbb; font-size: 14px; padding: 24px; text-align: center; }
 .pv-bar { position: absolute; left: 0; right: 0; z-index: 2; background: rgba(20,20,20,.94); color: #eee; transition: transform .22s ease, opacity .22s; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
 .pv-bar.top { top: 0; display: flex; align-items: center; gap: 4px; height: 52px; border-bottom: 1px solid #2c2c2c; }
@@ -509,7 +511,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
     <div class="sheet-head"><strong>Opções de leitura</strong><button class="ibtn" id="pvSheetClose" aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     <div class="row" id="pvRowMode" hidden><span>Modo</span><div class="seg" id="pvOptMode"><button data-v="pages" aria-pressed="true">Página original</button><button data-v="text">Texto ajustável</button></div></div>
     <div class="row" id="pvRowDir"><span>Direção</span><div class="seg" id="pvOptDir"><button data-v="ltr">Esquerda → direita</button><button data-v="rtl">Mangá (← direita)</button></div></div>
-    <div class="row"><span>Ajuste</span><div class="seg" id="pvOptFit"><button data-v="screen">Página inteira</button><button data-v="width">Largura da tela</button></div></div>
+    <div class="row"><span>Ajuste</span><div class="seg" id="pvOptFit"><button data-v="fill" id="pvFitFill">Preencher tela</button><button data-v="width">Largura</button><button data-v="screen">Página inteira</button></div></div>
     <div class="row"><span>Página dupla</span><div class="seg" id="pvOptSpread"><button data-v="auto">Com o celular deitado</button><button data-v="never">Nunca</button></div></div>
   </section>
 
@@ -1308,7 +1310,9 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
   const pv = $('pv'), pvStage = $('pvStage');
   let pvOpen = false, pvSrc = null, pvId = null, pvIdx = 0, pvSpreads = [[0]], pvDims = new Map(), pvZoom = { s: 1, x: 0, y: 0 };
   const comicPrefs = Object.assign({ dir: 'ltr', fit: 'screen', spread: 'auto' }, store.get('pvPrefs', {}));
-  const docPrefs = Object.assign({ dir: 'ltr', fit: 'width', spread: 'never' }, store.get('pvPrefsDoc', {}));
+  const docPrefs = Object.assign({ dir: 'ltr', fit: 'fill', spread: 'never' }, store.get('pvPrefsDoc', {}));
+  // versão anterior: o padrão era "largura"; passa para "preencher tela" uma vez
+  if (!store.get('docFillDefault', false)) { docPrefs.fit = 'fill'; store.set('docFillDefault', true); store.set('pvPrefsDoc', docPrefs); }
   let pvPrefs = comicPrefs;
   let pvBookDir = null;
   const pvDir = () => pvBookDir || pvPrefs.dir;
@@ -1320,8 +1324,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
       if (f === 'pdf') {
         const r = await fetch('/pdf/' + encodeURIComponent(m.id) + '/info.json', { cache: 'no-store' });
         const info = await r.json(); if (info.error) throw new Error(info.error);
-        const W = () => Math.min(2400, Math.round(pvStage.clientWidth * (devicePixelRatio || 1) * (pvPrefs.fit === 'width' ? 1 : 1.3)));
-        src = { count: info.pages, url: i => '/pdf/' + encodeURIComponent(m.id) + '/' + i + '.jpg?w=' + W(), kind: 'pdf' };
+        const W = () => Math.min(2400, Math.round(pvStage.clientWidth * (devicePixelRatio || 1) * (pvPrefs.fit === 'screen' ? 1.3 : 1)));
+        src = { count: info.pages, url: i => '/pdf/' + encodeURIComponent(m.id) + '/' + i + '.jpg?w=' + W() + (pvPrefs.fit === 'fill' ? '&crop=1' : ''), kind: 'pdf' };
       } else if (f === 'djvu') throw new Error('Arquivos DJVU ainda não são suportados.');
       else {
         const r = await fetch('/comic/' + encodeURIComponent(m.id) + '/pages.json', { cache: 'no-store' });
@@ -1344,7 +1348,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
     const isDoc = src.kind === 'pdf';
     pvPrefs = isDoc ? docPrefs : comicPrefs;
     pv.classList.toggle('doc', isDoc);
-    $('pvRowMode').hidden = !isDoc; $('pvRowDir').hidden = isDoc;
+    $('pvRowMode').hidden = !isDoc; $('pvRowDir').hidden = isDoc; $('pvFitFill').hidden = !isDoc;
+    if (!isDoc && comicPrefs.fit === 'fill') comicPrefs.fit = 'width';
     const saved = store.get('dir:' + m.id, null);
     pvBookDir = isDoc ? 'ltr' : saved || (/(manga|mangá)/i.test((m.group || '') + ' ' + (m.folder || '') + ' ' + (m.fileName || '')) ? 'rtl' : null);
     $('pvTitle').textContent = m.title || cleanName(m.fileName);
@@ -1491,7 +1496,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
       if (!g.moved && Date.now() - lastTap < 300) { resetZoom(); lastTap = 0; } else if (!g.moved) lastTap = Date.now();
       return;
     }
-    if (pvPrefs.fit !== 'width' || Math.abs(dx) > Math.abs(dy) * 1.5) {
+    if (pvPrefs.fit === 'screen' || Math.abs(dx) > Math.abs(dy) * 1.5) {
       if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5 && dt < 800) { dx < 0 ? (pvDir() === 'rtl' ? pvPrev() : pvNext()) : (pvDir() === 'rtl' ? pvNext() : pvPrev()); return; }
     }
     if (g.moved) return;
@@ -1514,7 +1519,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
   pvStage.addEventListener('pointerup', endPtr);
   pvStage.addEventListener('pointercancel', e => { ptrs.delete(e.pointerId); gesture = null; });
   pvStage.addEventListener('wheel', e => {
-    if (pvPrefs.fit === 'width') return;
+    if (pvPrefs.fit !== 'screen') return;
     e.preventDefault(); if (wheelLock2) return; wheelLock2 = true; setTimeout(() => wheelLock2 = false, 300);
     (e.deltaY || e.deltaX) > 0 ? pvNext() : pvPrev();
   }, { passive: false });

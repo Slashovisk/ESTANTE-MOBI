@@ -294,7 +294,8 @@ public class MainActivity extends Activity {
                     try { w = Integer.parseInt(u.getQueryParameter("w")); } catch (Exception ignored) { }
                     Map<String, String> h = new HashMap<>();
                     h.put("Cache-Control", "max-age=86400");
-                    return new WebResourceResponse("image/jpeg", null, 200, "OK", h, new ByteArrayInputStream(pdfs.render(b, i, w)));
+                    boolean crop = "1".equals(u.getQueryParameter("crop"));
+                    return new WebResourceResponse("image/jpeg", null, 200, "OK", h, new ByteArrayInputStream(pdfs.render(b, i, w, crop)));
                 }
                 default: {
                     InputStream in = getAssets().open("www" + path);
