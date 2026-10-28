@@ -5,6 +5,10 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+# permite criar a versão (Release) com o APK anexado
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -23,11 +27,30 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Renomear APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk "EstanteMobi-1.0.${{ github.run_number }}.apk"
+      - name: Preparar arquivos
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk "Estante-1.0.${{ github.run_number }}.apk"
+          # nome fixo: o link .../releases/latest/download/Estante.apk sempre baixa a versão mais nova
+          cp app/build/outputs/apk/debug/app-debug.apk Estante.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: EstanteMobi-1.0.${{ github.run_number }}
-          path: EstanteMobi-*.apk
+          name: Estante-1.0.${{ github.run_number }}
+          path: Estante-1.0.*.apk
           retention-days: 30
+
+      - name: Publicar versão
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Estante 1.0.${{ github.run_number }}
+          make_latest: true
+          body: |
+            **Baixar no celular:** toque em `Estante.apk` abaixo e depois abra o arquivo baixado.
+            Na primeira vez, o Android pede para permitir "instalar de fontes desconhecidas".
+            Esta versão instala por cima da anterior sem apagar a estante.
+
+            Alteração: ${{ github.event.head_commit.message || 'build manual' }}
+          files: |
+            Estante.apk
+            Estante-1.0.${{ github.run_number }}.apk

@@ -8,15 +8,13 @@ Aplicativo Android para guardar e ler livros, quadrinhos e PDFs, com uma estante
 | Quadrinhos | CBZ, CBR, ZIP com imagens | Página por página, zoom com pinça ou toque duplo, página dupla com o celular deitado, modo mangá |
 | Documentos | PDF | Páginas desenhadas pelo leitor de PDF do próprio Android, com zoom |
 
-## Gerar o APK
+## Baixar e instalar
 
-Cada envio (`push`) para este repositório gera um APK novo automaticamente:
+**Link direto da versão mais nova:** https://github.com/Slashovisk/ESTANTE-MOBI/releases/latest/download/Estante.apk
 
-1. Abra a aba **Actions** e clique no build mais recente (ícone verde).
-2. Em **Artifacts**, baixe `EstanteMobi-1.0.N`. Vem um .zip com o APK dentro.
-3. Copie o APK para o celular e toque nele. Na primeira vez, o Android pede para permitir "instalar de fontes desconhecidas"; se o Play Protect avisar, toque em **Instalar mesmo assim**.
+Abra o link no celular, baixe e toque no arquivo. Na primeira vez, o Android pede para permitir "instalar de fontes desconhecidas"; se o Play Protect avisar, toque em **Instalar mesmo assim**. Todas as versões ficam listadas em **Releases**, à direita na página do repositório.
 
-Cada versão nova instala por cima da anterior **sem apagar a estante**. Também dá para gerar manualmente em **Actions → Gerar APK → Run workflow**, ou pelo Android Studio (**Build → Build APK(s)**).
+Cada envio (`push`) para este repositório compila o app e publica uma versão nova em Releases, com o número `1.0.N`. Ela instala por cima da anterior **sem apagar a estante**. Também dá para gerar manualmente em **Actions → Gerar APK → Run workflow**, ou pelo Android Studio (**Build → Build APK(s)**).
 
 ## Como usar
 
