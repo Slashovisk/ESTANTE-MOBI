@@ -56,6 +56,9 @@ button:focus-visible, input:focus-visible, a:focus-visible, label:focus-within {
 .flow h1 + h3 { margin-top: .2em; }
 .flow img { display: block; max-width: 100%; max-height: var(--col-h, 80vh); margin: 0 auto; object-fit: contain; break-inside: avoid; }
 .flow a { color: var(--accent); text-decoration: none; }
+/* o tema manda na cor: livros com cor de texto ou de fundo fixa no arquivo (comum em MOBI/EPUB) ficariam ilegíveis no tema escuro */
+.flow * { color: inherit !important; background-color: transparent !important; border-color: currentColor !important; }
+.flow a[href], .flow a[href] * { color: var(--accent) !important; }
 .flow a:hover { text-decoration: underline; }
 .flow blockquote { margin: 1em 1.5em; }
 .flow .mobi-pagebreak { break-after: column; height: 0; }
