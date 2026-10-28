@@ -215,9 +215,9 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
 .cont .prog { margin-top: 12px; max-width: 360px; }
 .cont .pl { margin-top: 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 26px 20px; }
-@media (max-width: 600px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px 12px; } .lib-head h1 { font-size: 26px; } }
-@media (max-width: 340px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--cw, 140px), 1fr)); gap: 26px 20px; }
+@media (max-width: 600px) { .grid { grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 20px 12px; } .lib-head h1 { font-size: 26px; } }
+@media (max-width: 340px) { .grid { grid-template-columns: repeat(min(var(--cols, 3), 2), minmax(0, 1fr)); } }
 .card { display: grid; gap: 8px; align-content: start; min-width: 0; }
 .cv { position: relative; aspect-ratio: 2 / 3; width: 100%; max-width: 100%; border-radius: 3px 5px 5px 3px; overflow: hidden; background: var(--rule); box-shadow: 0 1px 2px rgba(0,0,0,.18), 0 6px 14px -6px rgba(0,0,0,.28); }
 .cv img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -306,6 +306,15 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
 .frow small { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .frow .btn { min-height: 40px; }
 
+
+/* ---------- configurações ---------- */
+.head-acts { display: flex; align-items: center; gap: 8px; }
+.gear svg { width: 22px; height: 22px; }
+@media (max-width: 600px) { .head-acts .gear .lbl { display: none; } .head-acts .gear { width: 44px; height: 44px; } }
+.setsheet .hint { margin: 6px 0 0; font-size: 12px; color: var(--muted); line-height: 1.4; }
+.setsheet .about { margin: 14px 0 0; font-size: 12px; color: var(--muted); line-height: 1.5; text-align: center; }
+#library[data-covers="s"] { --cw: 104px; --cols: 4; }
+#library[data-covers="l"] { --cw: 190px; --cols: 2; }
 /* ---------- leitor de páginas (quadrinhos e PDF) ---------- */
 /* PDF nas páginas originais: visual claro, que segue o tema */
 .pv.doc { background: var(--rule); color: var(--ink); }
@@ -429,7 +438,10 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
     <div class="lib-wrap">
       <header class="lib-head">
         <div><h1>Estante</h1><p id="libCount"></p></div>
+        <div class="head-acts">
+        <button class="ibtn gear" id="btnSettings" aria-label="Configurações"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="lbl">Configurações</span></button>
         <button class="btn primary add" id="btnAdd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Adicionar</button>
+        </div>
       </header>
       <div class="lib-tools" id="libTools">
         <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg><input type="search" id="libSearch" placeholder="Buscar por título ou autor" autocomplete="off"></label>
@@ -500,6 +512,18 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
     <div class="row"><span>Ajuste</span><div class="seg" id="pvOptFit"><button data-v="screen">Página inteira</button><button data-v="width">Largura da tela</button></div></div>
     <div class="row"><span>Página dupla</span><div class="seg" id="pvOptSpread"><button data-v="auto">Com o celular deitado</button><button data-v="never">Nunca</button></div></div>
   </section>
+
+  <section class="drawer sheet setsheet" id="setSheet" aria-label="Configurações" aria-hidden="true">
+    <div class="grab"></div>
+    <div class="sheet-head"><strong>Configurações</strong><button class="ibtn" id="setClose" aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="row"><span>Tema</span><div><div class="swatches" id="setPaper"><div class="swwrap"><button class="sw auto" data-v="auto" aria-label="Automático (segue o celular)">Aa</button><div class="swlbl">Auto</div></div><div class="swwrap"><button class="sw white" data-v="white" aria-label="Branco">Aa</button><div class="swlbl">Branco</div></div><div class="swwrap"><button class="sw sepia" data-v="sepia" aria-label="Sépia">Aa</button><div class="swlbl">Sépia</div></div><div class="swwrap"><button class="sw green" data-v="green" aria-label="Verde">Aa</button><div class="swlbl">Verde</div></div><div class="swwrap"><button class="sw black" data-v="black" aria-label="Preto">Aa</button><div class="swlbl">Preto</div></div></div><p class="hint">"Auto" acompanha o modo claro ou escuro do celular. Vale para a estante e para a leitura.</p></div></div>
+    <div class="row"><span>Capas</span><div class="seg" id="setCovers"><button data-v="s">Pequenas</button><button data-v="m">Médias</button><button data-v="l">Grandes</button></div></div>
+    <div class="row"><span>Leitura</span><div class="seg"><button id="setReading">Fonte, tamanho e margens…</button></div></div>
+    <div class="row"><span>PDF abre em</span><div><div class="seg" id="setPdf"><button data-v="pages">Página original</button><button data-v="text">Texto ajustável</button></div><p class="hint">Para PDFs na aba PDF. Os que estão em Livros sempre abrem como texto.</p></div></div>
+    <div class="row"><span>Quadrinhos</span><div class="seg" id="setDir"><button data-v="ltr">Esquerda → direita</button><button data-v="rtl">Mangá (← direita)</button></div></div>
+    <div class="row" id="setFoldersRow"><span>Pastas</span><div class="seg"><button id="setFolders">Pastas da estante…</button></div></div>
+    <p class="about" id="setAbout"></p>
+  </section>
   <div class="toast" id="toast" hidden></div>
   <div class="notice" id="notice" hidden></div>
   <div class="drop" id="drop" hidden>Solte os arquivos .mobi para guardar na estante</div>
@@ -527,6 +551,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
   const FONTS = { lit: '"Literata", Georgia, serif', ss: '"Source Serif 4", Georgia, serif', ah: '"Atkinson Hyperlegible", system-ui, sans-serif' };
   const MARGINS = { s: 20, m: 52, l: 96 };
   const prefs = Object.assign({ font: 'lit', size: innerWidth < 600 ? 3 : 4, lh: '1.6', margin: 'm', align: 'justify', paper: 'white' }, store.get('prefs2', {}));
+  // no app, quem nunca escolheu um tema passa a seguir o modo claro/escuro do celular
+  if (window.Android && !store.get('themeChosen', false)) prefs.paper = 'auto';
   const statusModes = ['chapterTime', 'page', 'loc', 'bookTime'];
   let leftMode = store.get('leftMode', 0);
 
@@ -551,7 +577,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
     document.querySelectorAll('#optLh button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === prefs.lh));
     document.querySelectorAll('#optMargin button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === prefs.margin));
     document.querySelectorAll('#optAlign button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === prefs.align));
-    document.querySelectorAll('#optPaper button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === prefs.paper));
+    document.querySelectorAll('#optPaper button, #setPaper button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === prefs.paper));
     $('sizeDots').innerHTML = SIZES.map((_, i) => '<i class="' + (i <= prefs.size ? 'on' : '') + '"></i>').join('');
     store.set('prefs2', prefs);
   }
@@ -1252,6 +1278,29 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
     renderLibrary();
   };
 
+  // ---------- configurações ----------
+  function renderSettings() {
+    const covers = store.get('covers', 'm');
+    $('library').dataset.covers = covers;
+    document.querySelectorAll('#setCovers button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === covers));
+    const pdfDef = store.get('pdfDefault', 'pages');
+    document.querySelectorAll('#setPdf button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === pdfDef));
+    document.querySelectorAll('#setDir button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === comicPrefs.dir));
+    $('setFoldersRow').hidden = !(Native && Native.listFolders);
+    let ver = '';
+    try { ver = Native && Native.appVersion ? Native.appVersion() : ''; } catch (e) {}
+    $('setAbout').textContent = 'Estante' + (ver ? ' ' + ver : ' (versão web)') + ' · Livros: MOBI, EPUB, FB2, TXT · Quadrinhos: CBZ, CBR, ZIP · PDF';
+    applyPrefs();
+  }
+  $('btnSettings').onclick = () => { renderSettings(); openPanel('setSheet'); };
+  $('setClose').onclick = () => closePanels();
+  document.querySelectorAll('#setCovers button').forEach(b => b.onclick = () => { store.set('covers', b.dataset.v); renderSettings(); });
+  document.querySelectorAll('#setPdf button').forEach(b => b.onclick = () => { store.set('pdfDefault', b.dataset.v); renderSettings(); });
+  document.querySelectorAll('#setDir button').forEach(b => b.onclick = () => { comicPrefs.dir = b.dataset.v; store.set('pvPrefs', comicPrefs); renderSettings(); });
+  $('setReading').onclick = () => openPanel('sheet');
+  $('setFolders').onclick = () => { renderFolders(); openPanel('folderSheet'); };
+  $('library').dataset.covers = store.get('covers', 'm');
+
   let toastT = 0;
   function toast(msg) { const el = $('toast'); el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 2800); }
 
@@ -1487,7 +1536,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
     if (!m) return;
     closePanels(); hideNotice();
     const f0 = fmtOf(m);
-    const pdfMode = f0 === 'pdf' ? (Native ? store.get('pdfmode:' + id, kindOf(m) === 'book' ? 'text' : 'pages') : 'text') : null;
+    const pdfMode = f0 === 'pdf' ? (Native ? store.get('pdfmode:' + id, kindOf(m) === 'book' ? 'text' : store.get('pdfDefault', 'pages')) : 'text') : null;
     const asPages = f0 === 'pdf' ? pdfMode === 'pages' : ['cbz', 'cbr', 'zip', 'djvu'].includes(f0);
     if (asPages) {
       $('pvLoading').hidden = false; pv.hidden = false;
@@ -1622,7 +1671,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
     if (id === 'toc') { const cur = $('tocList').querySelector('.cur'); if (cur) cur.scrollIntoView({ block: 'center' }); }
   }
   function closePanels(keep) {
-    ['toc', 'sheet', 'bookSheet', 'addSheet', 'folderSheet', 'pvSheet'].forEach(id => { $(id).classList.remove('on'); $(id).setAttribute('aria-hidden', 'true'); });
+    ['toc', 'sheet', 'bookSheet', 'addSheet', 'folderSheet', 'pvSheet', 'setSheet'].forEach(id => { $(id).classList.remove('on'); $(id).setAttribute('aria-hidden', 'true'); });
     if (!keep) $('scrim').classList.remove('on');
   }
   $('btnToc').onclick = () => openPanel('toc');
@@ -1668,7 +1717,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
     prefs[key] = b.dataset.v; applyPrefs(); if (relayout) requestAnimationFrame(() => layout());
   });
   bindSeg('optFont', 'font', true); bindSeg('optLh', 'lh', true); bindSeg('optMargin', 'margin', true); bindSeg('optAlign', 'align', true); bindSeg('optPaper', 'paper', false);
-  document.querySelectorAll('#optPaper button').forEach(b => b.addEventListener('click', () => setTimeout(syncBars, 30)));
+  document.querySelectorAll('#optPaper button').forEach(b => b.addEventListener('click', () => { store.set('themeChosen', true); setTimeout(syncBars, 30); }));
+  document.querySelectorAll('#setPaper button').forEach(b => b.onclick = () => { prefs.paper = b.dataset.v; store.set('themeChosen', true); applyPrefs(); setTimeout(syncBars, 30); });
   const resize = d => { prefs.size = Math.max(0, Math.min(SIZES.length - 1, prefs.size + d)); applyPrefs(); requestAnimationFrame(() => layout()); };
   $('sizeDown').onclick = () => resize(-1); $('sizeUp').onclick = () => resize(1);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => layout());

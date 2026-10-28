@@ -103,7 +103,9 @@ public class MainActivity extends Activity {
         }
 
         root = new FrameLayout(this);
-        root.setBackgroundColor(Color.parseColor("#FBFAF7"));
+        boolean night = (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        root.setBackgroundColor(Color.parseColor(night ? "#141413" : "#FBFAF7"));
         web = new WebView(this);
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
@@ -117,6 +119,8 @@ public class MainActivity extends Activity {
         s.setTextZoom(100);
         s.setSupportZoom(false);
         s.setBuiltInZoomControls(false);
+        // O app tem modo escuro próprio: impede que o Android escureça a página por cima (texto preto em fundo escuro)
+        disableForcedDark(s);
         web.setOverScrollMode(View.OVER_SCROLL_NEVER);
         web.setBackgroundColor(Color.TRANSPARENT);
         web.addJavascriptInterface(new Bridge(), "Android");
@@ -171,6 +175,19 @@ public class MainActivity extends Activity {
             web.destroy();
         }
         super.onDestroy();
+    }
+
+    @SuppressWarnings("deprecation")
+    private void disableForcedDark(WebSettings s) {
+        if (Build.VERSION.SDK_INT >= 29) {
+            root.setForceDarkAllowed(false);
+            web.setForceDarkAllowed(false);
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            s.setAlgorithmicDarkeningAllowed(false);
+        } else if (Build.VERSION.SDK_INT >= 29) {
+            s.setForceDark(WebSettings.FORCE_DARK_OFF);
+        }
     }
 
     // ---------------------------------------------------------------- barras do sistema
@@ -648,6 +665,15 @@ public class MainActivity extends Activity {
                 importBytes(Base64.decode(b64, Base64.DEFAULT), name, openAfter);
             } catch (IllegalArgumentException e) {
                 importFailed(name, "Dados inválidos.");
+            }
+        }
+
+        @JavascriptInterface
+        public String appVersion() {
+            try {
+                return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            } catch (Exception e) {
+                return "";
             }
         }
 
