@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 e anteriores: inclui a estante (arquivos e progresso) no backup do Google. -->
+<full-backup-content>
+    <include domain="file" path="books/" />
+    <include domain="sharedpref" path="." />
+</full-backup-content>
