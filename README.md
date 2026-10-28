@@ -6,7 +6,7 @@ Aplicativo Android para guardar e ler livros, quadrinhos e PDFs, com uma estante
 |---|---|---|
 | Livros | MOBI, EPUB, FB2, TXT (e AZW3 que traga a parte MOBI) | Leitor paginado no estilo Kindle: fontes, temas, sumário, tempo restante |
 | Quadrinhos | CBZ, CBR, ZIP com imagens | Página por página, zoom com pinça ou toque duplo, página dupla com o celular deitado, modo mangá |
-| Documentos | PDF | Páginas desenhadas pelo leitor de PDF do próprio Android, com zoom |
+| PDF | PDF | **Texto ajustável** no leitor de livros (fonte, tamanho, tema, sumário) ou **página original** com zoom. PDFs escaneados abrem sempre na página original |
 
 ## Baixar e instalar
 
@@ -28,7 +28,8 @@ Outros detalhes:
 - **"Abrir com" e "Compartilhar":** tocando num arquivo no gerenciador de arquivos ou na lista de downloads e escolhendo *Estante*, o arquivo entra na estante e já abre.
 - **Abas Livros, Quadrinhos e PDF:** aparecem quando há mais de um tipo. A busca procura em todas as abas.
 - **"Continuar lendo":** mostra os últimos itens abertos, de qualquer tipo.
-- **Pressionar e segurar uma capa** (ou tocar em ⋯): mostra detalhes, permite marcar como lido ou não lido e remover. Itens de pasta são só ocultados; o arquivo continua no celular.
+- **Pressionar e segurar uma capa** (ou tocar em ⋯): mostra detalhes, permite escolher onde o item aparece (**Livros, Quadrinhos ou PDF**), marcar como lido ou não lido e remover. Itens de pasta são só ocultados; o arquivo continua no celular.
+- **PDF que é livro:** mova-o para **Livros**. Ele passa a abrir como texto ajustável; o botão *Ver páginas originais* fica no painel Aa. Na aba PDF, o padrão é a página original, com a opção *Texto ajustável* nas opções de leitura.
 - **Pastas da estante:** em Adicionar → Pastas da estante, dá para atualizar ou remover uma pasta.
 - **Quadrinhos:** tocar nas laterais vira a página e no centro mostra os controles. Nas opções, escolha a direção (mangá lê da direita para a esquerda), o ajuste (página inteira ou largura da tela) e a página dupla. Pastas e arquivos com "manga" no nome já abrem no modo mangá.
 - **Botão voltar:** fecha painéis, depois sai do livro ou da série, depois sai do app.
@@ -40,6 +41,7 @@ Outros detalhes:
 - **CBR em RAR 5:** a biblioteca usada lê RAR 4, o formato mais comum em quadrinhos. Arquivos em RAR 5 mostram um aviso; converta-os para CBZ.
 - **Ainda não suportados:** CB7 (7z) e DJVU.
 - **CBR na primeira abertura:** as páginas são extraídas para o cache, o que leva alguns segundos em arquivos grandes. O app guarda as duas últimas revistas extraídas.
+- **Texto de PDF:** a montagem de parágrafos funciona bem em livros e textos corridos. Tabelas, PDFs em várias colunas e imagens dentro do texto podem sair desorganizados ou sumir; nesses casos, use a página original.
 - **Fontes de leitura:** vêm do Google Fonts. Sem internet, o app usa as fontes serifadas do Android.
 - **Versão do Android:** 8.0 ou mais novo.
 
@@ -62,7 +64,7 @@ web/montar.py                        junta tudo em assets/www/index.html
 .github/workflows/gerar-apk.yml      build automático
 ```
 
-A única biblioteca externa é a [junrar](https://github.com/junrar/junrar), usada para ler RAR. A página fala com o Java por uma ponte chamada `Android` e lê os arquivos por endereços servidos pelo próprio app, sem internet:
+Bibliotecas externas: [junrar](https://github.com/junrar/junrar), para ler RAR, e [pdf.js](https://github.com/mozilla/pdf.js), para extrair o texto dos PDFs. O pdf.js é baixado pelo build do GitHub para `app/src/main/assets/www/pdfjs/`; num build local sem ele, o app busca o pdf.js na internet na primeira vez. A página fala com o Java por uma ponte chamada `Android` e lê os arquivos por endereços servidos pelo próprio app, sem internet:
 
 | Endereço | Conteúdo |
 |---|---|

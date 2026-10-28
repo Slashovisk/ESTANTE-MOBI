@@ -314,7 +314,7 @@ public class MainActivity extends Activity {
     private static String mimeOf(String path) {
         String p = path.toLowerCase(Locale.ROOT);
         if (p.endsWith(".html")) return "text/html";
-        if (p.endsWith(".js")) return "application/javascript";
+        if (p.endsWith(".js") || p.endsWith(".mjs")) return "text/javascript";
         if (p.endsWith(".css")) return "text/css";
         if (p.endsWith(".json")) return "application/json";
         if (p.endsWith(".svg")) return "image/svg+xml";

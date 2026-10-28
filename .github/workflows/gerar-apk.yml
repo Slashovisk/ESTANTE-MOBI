@@ -22,6 +22,19 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Baixar pdf.js (texto ajustável de PDF)
+        run: |
+          set -e
+          mkdir -p /tmp/pdfjs && cd /tmp/pdfjs
+          npm pack pdfjs-dist@4.10.38 --silent
+          tar xzf pdfjs-dist-4.10.38.tgz
+          D="$GITHUB_WORKSPACE/app/src/main/assets/www/pdfjs"
+          mkdir -p "$D/cmaps"
+          cp package/legacy/build/pdf.min.mjs package/legacy/build/pdf.worker.min.mjs "$D/"
+          cp package/cmaps/*.bcmap "$D/cmaps/"
+          cp package/LICENSE "$D/LICENSE.txt"
+          du -sh "$D"; ls "$D"
+
       - name: Compilar
         run: |
           chmod +x gradlew

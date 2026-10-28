@@ -16,6 +16,7 @@ final class Book {
     String title;
     String author;
     String hash;
+    String kind;        // categoria escolhida pelo usuário; nulo = automática pelo formato
     long size, mtime, added, lastRead;
     double pos;
     int pages;

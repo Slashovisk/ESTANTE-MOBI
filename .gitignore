@@ -9,3 +9,5 @@ captures/
 # chave da Play Store: nunca envie para o repositório
 keystore.properties
 *.jks
+# pdf.js é baixado pelo build do GitHub (gerar-apk.yml)
+app/src/main/assets/www/pdfjs/

@@ -18,7 +18,7 @@ import java.util.Set;
 /** Banco da estante (SQLite do próprio Android). Aguenta dezenas de milhares de itens. */
 final class LibraryDb extends SQLiteOpenHelper {
 
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
     LibraryDb(Context ctx) {
         super(ctx, "estante.db", null, VERSION);
@@ -31,18 +31,21 @@ final class LibraryDb extends SQLiteOpenHelper {
                 "id TEXT PRIMARY KEY, source TEXT NOT NULL, path TEXT, uri TEXT, folder_uri TEXT, folder TEXT, grp TEXT," +
                 "name TEXT, format TEXT, size INTEGER DEFAULT 0, mtime INTEGER DEFAULT 0, added INTEGER DEFAULT 0," +
                 "title TEXT, author TEXT, last_read INTEGER DEFAULT 0, pos REAL DEFAULT 0, hidden INTEGER DEFAULT 0," +
-                "hash TEXT, probed INTEGER DEFAULT 0, pages INTEGER DEFAULT 0)");
+                "hash TEXT, probed INTEGER DEFAULT 0, pages INTEGER DEFAULT 0, kind TEXT)");
         db.execSQL("CREATE INDEX books_folder ON books(folder_uri)");
         db.execSQL("CREATE INDEX books_hash ON books(hash)");
         db.execSQL("CREATE TABLE folders (uri TEXT PRIMARY KEY, name TEXT, added INTEGER, last_scan INTEGER DEFAULT 0)");
     }
 
     @Override
-    public void onUpgrade(SQLiteDatabase db, int oldV, int newV) { }
+    public void onUpgrade(SQLiteDatabase db, int oldV, int newV) {
+        // versão 2: categoria escolhida pelo usuário (Livros, Quadrinhos, PDF)
+        if (oldV < 2) db.execSQL("ALTER TABLE books ADD COLUMN kind TEXT");
+    }
 
     // ------------------------------------------------------------ leitura
 
-    private static final String COLS = "id, source, path, uri, folder_uri, folder, grp, name, format, size, mtime, added, title, author, last_read, pos, hash, pages";
+    private static final String COLS = "id, source, path, uri, folder_uri, folder, grp, name, format, size, mtime, added, title, author, last_read, pos, hash, pages, kind";
 
     private static Book fromCursor(Cursor c) {
         Book b = new Book();
@@ -50,7 +53,7 @@ final class LibraryDb extends SQLiteOpenHelper {
         b.folderUri = c.getString(4); b.folder = c.getString(5); b.group = c.getString(6); b.name = c.getString(7);
         b.format = c.getString(8); b.size = c.getLong(9); b.mtime = c.getLong(10); b.added = c.getLong(11);
         b.title = c.getString(12); b.author = c.getString(13); b.lastRead = c.getLong(14); b.pos = c.getDouble(15);
-        b.hash = c.getString(16); b.pages = c.getInt(17);
+        b.hash = c.getString(16); b.pages = c.getInt(17); b.kind = c.getString(18);
         return b;
     }
 
@@ -87,6 +90,7 @@ final class LibraryDb extends SQLiteOpenHelper {
                     if (b.group != null) o.put("group", b.group);
                     if (b.folder != null) o.put("folder", b.folder);
                     if (b.pages > 0) o.put("pages", b.pages);
+                    if (b.kind != null) o.put("kind", b.kind);
                     arr.put(o);
                 } catch (Exception ignored) { }
             }
@@ -113,6 +117,10 @@ final class LibraryDb extends SQLiteOpenHelper {
         if (patch.has("pos")) v.put("pos", patch.optDouble("pos", 0));
         if (patch.has("lastRead")) v.put("last_read", patch.optLong("lastRead", 0));
         if (patch.has("pages")) v.put("pages", patch.optInt("pages", 0));
+        if (patch.has("kind")) {
+            String k = patch.optString("kind");
+            if (k.equals("book") || k.equals("comic") || k.equals("doc")) v.put("kind", k);
+        }
         if (v.size() > 0) getWritableDatabase().update("books", v, "id = ?", new String[]{id});
     }
 

@@ -325,6 +325,202 @@
     };
   }
 
+  // ---------------------------------------------------------------- PDF como texto ajustável
+  // Usa o pdf.js (o mesmo leitor do Firefox) só para extrair o texto; a montagem de
+  // parágrafos, títulos e o sumário é feita aqui. PDFs escaneados (só imagem) não têm texto.
+  const PDFJS_VER = '4.10.38';
+  const PDFJS_CDN = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + PDFJS_VER;
+  let pdfjsP = null;
+  function loadPdfJs() {
+    if (!pdfjsP) pdfjsP = (async () => {
+      const tries = [
+        ['/pdfjs/pdf.min.mjs', '/pdfjs/pdf.worker.min.mjs', '/pdfjs/cmaps/'],
+        [PDFJS_CDN + '/legacy/build/pdf.min.mjs', PDFJS_CDN + '/legacy/build/pdf.worker.min.mjs', PDFJS_CDN + '/cmaps/'],
+      ];
+      for (const [lib, worker, cmaps] of tries) {
+        try {
+          const m = await import(lib);
+          m.GlobalWorkerOptions.workerSrc = worker;
+          return { lib: m, cmaps };
+        } catch (e) { /* tenta a próxima fonte */ }
+      }
+      throw new Error('O leitor de texto de PDF não carregou (sem internet?).');
+    })();
+    return pdfjsP.catch(e => { pdfjsP = null; throw e; });
+  }
+
+  async function parsePdfText(buf, onProgress) {
+    const { lib, cmaps } = await loadPdfJs();
+    const pdf = await lib.getDocument({ data: new Uint8Array(buf), cMapUrl: cmaps, cMapPacked: true, isEvalSupported: false, disableFontFace: true }).promise;
+    try {
+      const n = pdf.numPages, pages = [];
+      let chars = 0;
+      for (let i = 1; i <= n; i++) {
+        const page = await pdf.getPage(i);
+        const vp = page.getViewport({ scale: 1 });
+        const tc = await page.getTextContent();
+        const items = [];
+        for (const it of tc.items) {
+          if (typeof it.str !== 'string') continue;
+          const t = it.transform || [1, 0, 0, 1, 0, 0];
+          if (Math.abs(t[1]) > Math.abs(t[0]) * .5 + .01) continue; // texto girado (lombadas, marcas d'água)
+          const fs = Math.hypot(t[2], t[3]) || it.height || 10;
+          items.push({ str: it.str, x: t[4], y: t[5], w: it.width || 0, fs, eol: !!it.hasEOL });
+          chars += it.str.trim().length;
+        }
+        pages.push({ n: i, w: vp.width, h: vp.height, items });
+        page.cleanup();
+        if (onProgress && (i % 5 === 0 || i === n)) onProgress(i, n);
+      }
+      let meta = {};
+      try { meta = (await pdf.getMetadata()).info || {}; } catch (e) {}
+      let outline = [];
+      try { outline = await outlineToc(pdf); } catch (e) {}
+      if (chars / Math.max(1, n) < 60) {
+        const err = new Error('Este PDF é escaneado (as páginas são imagens), então não dá para ajustar o texto.');
+        err.scanned = true; throw err;
+      }
+      const r = reflowPdf(pages);
+      return { title: (meta.Title || '').trim(), author: (meta.Author || '').trim(), language: '', cover: null, html: r.html, toc: outline.length >= 2 ? outline : r.toc, pages: n };
+    } finally {
+      try { pdf.destroy(); } catch (e) {}
+    }
+  }
+
+  async function outlineToc(pdf) {
+    const out = [];
+    const walk = async (items, level) => {
+      for (const it of items || []) {
+        let dest = it.dest;
+        try {
+          if (typeof dest === 'string') dest = await pdf.getDestination(dest);
+          if (Array.isArray(dest) && dest[0]) {
+            const idx = typeof dest[0] === 'number' ? dest[0] : await pdf.getPageIndex(dest[0]);
+            const label = (it.title || '').replace(/\s+/g, ' ').trim();
+            if (label) out.push({ label, href: '#pdfp' + (idx + 1), level });
+          }
+        } catch (e) {}
+        if (level < 2) await walk(it.items, level + 1);
+      }
+    };
+    await walk(await pdf.getOutline(), 1);
+    return out;
+  }
+
+  // Junta pedaços de texto em linhas, linhas em parágrafos; reconhece títulos pelo tamanho da letra.
+  function reflowPdf(pages) {
+    const median = a => { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+    const pct = (a, p) => { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(s.length * p))]; };
+
+    // 1. linhas
+    for (const pg of pages) {
+      const lines = []; let cur = null;
+      for (const it of pg.items) {
+        const s = it.str;
+        if (!s) { if (it.eol && cur) cur.eol = true; continue; }
+        const newLine = !cur || cur.eol || Math.abs(it.y - cur.y) > Math.max(cur.fs, it.fs) * .45 || it.x < cur.x1 - cur.fs * 3;
+        if (newLine) {
+          if (cur) lines.push(cur);
+          cur = { text: '', x0: it.x, x1: it.x, y: it.y, fs: it.fs, big: 0, eol: false };
+        }
+        const gap = it.x - cur.x1;
+        if (cur.text && !/\s$/.test(cur.text) && !/^\s/.test(s) && gap > it.fs * .18) cur.text += ' ';
+        cur.text += s;
+        cur.x1 = Math.max(cur.x1, it.x + it.w);
+        // tamanho dominante: o do trecho mais longo
+        const len = s.trim().length;
+        if (len > cur.big) { cur.big = len; cur.fs = it.fs; }
+        if (it.eol) cur.eol = true;
+      }
+      if (cur) lines.push(cur);
+      pg.lines = lines.map(l => Object.assign(l, { text: l.text.replace(/\s+/g, ' ').trim() })).filter(l => l.text);
+    }
+
+    // 2. cabeçalhos e rodapés: texto curto nas bordas da página que se repete (ou é só número)
+    const edgeKey = l => l.text.replace(/\d+/g, '#').toLowerCase();
+    const counts = new Map();
+    const isEdge = (pg, l) => l.y > pg.h * .92 || l.y < pg.h * .08;
+    for (const pg of pages) for (const l of pg.lines) if (isEdge(pg, l) && l.text.length < 90) counts.set(edgeKey(l), (counts.get(edgeKey(l)) || 0) + 1);
+    const rep = Math.max(3, Math.floor(pages.length * .3));
+    for (const pg of pages) pg.lines = pg.lines.filter(l => !(isEdge(pg, l) && l.text.length < 90 &&
+      (/^[\s\-–—]*(p[aá]g(ina)?\.?\s*)?\d{1,4}([\s\/de]+\d{1,4})?[\s\-–—]*$/i.test(l.text) || counts.get(edgeKey(l)) >= rep)));
+
+    // 3. tamanho de letra do corpo do texto (o mais usado, pesado pela quantidade de texto)
+    const fsW = new Map();
+    for (const pg of pages) for (const l of pg.lines) { const k = Math.round(l.fs * 2) / 2; fsW.set(k, (fsW.get(k) || 0) + l.text.length); }
+    let body = 10, best = -1;
+    for (const [k, w] of fsW) if (w > best) { best = w; body = k; }
+
+    // 4. blocos (parágrafos e títulos), atravessando páginas
+    const blocks = []; let para = null, lastLine = null, lastPage = null;
+    const endsSentence = s => /[.!?…:;»"”')\]]$/.test(s);
+    const flush = () => { if (para) { blocks.push(para); para = null; } };
+    for (const pg of pages) {
+      const bodyLines = pg.lines.filter(l => Math.abs(l.fs - body) < body * .15);
+      const left = pct(bodyLines.map(l => l.x0), .1) || 0;
+      const right = pct(bodyLines.map(l => l.x1), .9) || pg.w;
+      const gaps = [];
+      for (let i = 1; i < pg.lines.length; i++) { const d = pg.lines[i - 1].y - pg.lines[i].y; if (d > 0 && d < body * 3) gaps.push(d); }
+      const gap = median(gaps) || body * 1.3;
+      let pageMarked = false;
+      pg.lines.forEach((l, i) => {
+        const heading = l.fs >= body * 1.22 && l.text.length < 140;
+        const prev = i > 0 ? pg.lines[i - 1] : null;
+        const mark = () => { if (!pageMarked) { pageMarked = true; return pg.n; } return 0; };
+        if (heading) {
+          flush();
+          const lastB = blocks[blocks.length - 1];
+          const level = l.fs >= body * 1.6 ? 2 : 3;
+          if (lastB && lastB.type === 'h' && lastB.level === level && prev && lastLine === prev && prev.y - l.y < l.fs * 1.8) { lastB.text += ' ' + l.text; }
+          else blocks.push({ type: 'h', level, text: l.text, page: mark(), top: l.y > pg.h * .6 });
+          lastLine = l; lastPage = pg; return;
+        }
+        const indent = l.x0 > left + body * .8 && l.x0 < left + body * 6;
+        let start = !para;
+        if (para && lastLine) {
+          if (lastPage === pg) {
+            const dy = lastLine.y - l.y;
+            const shortPrev = lastLine.x1 < right - body * 3;
+            start = dy > gap * 1.45 || dy < 0 || indent || (shortPrev && endsSentence(lastLine.text));
+          } else {
+            const shortPrev = lastLine.x1 < (lastPage.right || right) - body * 3;
+            start = indent || (endsSentence(lastLine.text) && shortPrev);
+          }
+        }
+        const m = mark();
+        if (start) { flush(); para = { type: 'p', parts: [], page: 0 }; }
+        if (m) para.parts.push({ anchor: m });
+        const tail = para.parts.length ? para.parts[para.parts.length - 1] : null;
+        if (tail && tail.text != null) {
+          if (/[A-Za-zÀ-ÿ]-$/.test(tail.text) && /^[a-zà-ÿ]/.test(l.text)) tail.text = tail.text.slice(0, -1) + l.text; // hifenização
+          else tail.text += ' ' + l.text;
+        } else para.parts.push({ text: l.text });
+        lastLine = l; lastPage = pg;
+      });
+      pg.right = right;
+      if (!pageMarked) blocks.push({ type: 'anchor', page: pg.n });
+    }
+    flush();
+
+    // 5. HTML
+    const toc = []; let html = '', hn = 0;
+    for (const b of blocks) {
+      if (b.type === 'anchor') { html += '<a id="pdfp' + b.page + '"></a>'; continue; }
+      if (b.type === 'h') {
+        const id = 'pdfh' + (hn++);
+        if (b.level === 2 && html && b.top) html += '<div class="mobi-pagebreak"></div>';
+        if (b.page) html += '<a id="pdfp' + b.page + '"></a>';
+        html += '<h' + b.level + ' id="' + id + '">' + esc(b.text) + '</h' + b.level + '>';
+        if (b.text.length < 100) toc.push({ label: b.text, href: '#' + id, level: b.level === 2 ? 1 : 2 });
+        continue;
+      }
+      html += '<p>' + b.parts.map(x => x.anchor ? '<a id="pdfp' + x.anchor + '"></a>' : esc(x.text)).join(' ') + '</p>';
+    }
+    // sumário só com títulos grandes, se houver bastante
+    const big = toc.filter(t => t.level === 1);
+    return { html, toc: big.length >= 3 ? big : toc.slice(0, 300) };
+  }
+
   // Detecta o formato pelo conteúdo (e pelo nome, como desempate).
   function detect(buf, fileName) {
     const v = new Uint8Array(buf, 0, Math.min(buf.byteLength, 4096));
@@ -345,7 +541,7 @@
     return ext.toLowerCase() || 'desconhecido';
   }
 
-  const api = { ZipReader, parseEpub, parseFb2, parseTxt, openComicZip, detect, natural };
+  const api = { ZipReader, parseEpub, parseFb2, parseTxt, openComicZip, detect, natural, parsePdfText, reflowPdf, loadPdfJs };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Formats = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
